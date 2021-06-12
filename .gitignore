@@ -5,7 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
-.vscode/
+
 # Distribution / packaging
 .Python
 build/
@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# VS code Project files
+.vscode/
+
+# Credentials Environment files
+config.py
