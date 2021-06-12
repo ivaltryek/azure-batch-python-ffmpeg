@@ -11,7 +11,6 @@ def flip():
     stream = ffmpeg.vflip(stream)
     stream = ffmpeg.output(stream, 'output.mp4')
     logging.info(sys.argv[1])
-    logging.info('Hello World')
     ffmpeg.run(stream)
     logging.info('Finished')
     
