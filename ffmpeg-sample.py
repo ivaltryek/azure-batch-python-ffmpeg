@@ -12,59 +12,7 @@ import azure.batch._batch_service_client as batch
 import azure.batch.batch_auth as batchauth
 import azure.batch.models as batchmodels
 
-task_resource_files_urls = [
-    'https://raw.githubusercontent.com/meet86/azure-batch-python-ffmpeg/main/task.py'
-]
 
-
-def wrap_commands_in_shell(commands):
-    return "/bin/bash -c 'set -e; set -o pipefail; {}; wait'".format(';'.join(commands))
-
-
-command = "/bin/bash -c \"python3 task.py testparam\""
-
-task_resource_files = [batchmodels.ResourceFile(file_path=os.path.basename(
-    file_url), http_url=file_url) for file_url in task_resource_files_urls]
-
-
-tasks_creation_information = list()
-
-tasks_creation_information.append(batch.models.TaskAddParameter(
-    id='Task01',
-    command_line=command,
-    resource_files=task_resource_files
-))
-
-def create_pool(batch_service_client, pool_id):
-    """
-    Creates a pool of compute nodes with the specified OS settings.
-    :param batch_service_client: A Batch service client.
-    :type batch_service_client: `azure.batch.BatchServiceClient`
-    :param str pool_id: An ID for the new pool.
-    :param str publisher: Marketplace image publisher
-    :param str offer: Marketplace image offer
-    :param str sku: Marketplace image sku
-    """
-    print('Creating pool [{}]...'.format(pool_id))
-
-    # Create a new pool of Linux compute nodes using an Azure Virtual Machines
-    # Marketplace image. For more information about creating pools of Linux
-    # nodes, see:
-    # https://azure.microsoft.com/documentation/articles/batch-linux-nodes/
-    new_pool = batch.models.PoolAddParameter(
-        id=pool_id,
-        virtual_machine_configuration=batchmodels.VirtualMachineConfiguration(
-            image_reference=batchmodels.ImageReference(
-                publisher="Canonical",
-                offer="UbuntuServer",
-                sku="18.04-LTS",
-                version="latest"
-            ),
-            node_agent_sku_id="batch.node.ubuntu 18.04"),
-        vm_size=_POOL_VM_SIZE,
-        target_dedicated_nodes=_POOL_NODE_COUNT
-    )
-    batch_service_client.pool.add(new_pool)
 
 
 def create_job(batch_service_client, job_id, pool_id):
@@ -163,14 +111,31 @@ def print_task_output(batch_service_client, job_id, encoding=None):
         print("Standard output:")
         print(file_text)
 
+task_resource_files_urls = [
+    'https://raw.githubusercontent.com/meet86/azure-batch-python-ffmpeg/main/task.py'
+]
+
+command = "/bin/bash -c \"python3 task.py testparam\""
+
+task_resource_files = [batchmodels.ResourceFile(file_path=os.path.basename(
+    file_url), http_url=file_url) for file_url in task_resource_files_urls]
+
+
+tasks_creation_information = list()
+
+tasks_creation_information.append(batch.models.TaskAddParameter(
+    id='Task01',
+    command_line=command,
+    resource_files=task_resource_files
+))
+
+
 
 # This file contains environment variables.
 credentials = batchauth.SharedKeyCredentials(
     _BATCH_ACCOUNT_NAME, _BATCH_ACCOUNT_KEY)
 
 batch_client = batch.BatchServiceClient(credentials, _BATCH_ACCOUNT_URL)
-
-# create_pool(batch_client, _POOL_ID)
 
 create_job(batch_client, 'TestJob', _POOL_ID)
 
