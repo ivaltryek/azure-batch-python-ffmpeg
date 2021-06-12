@@ -8,3 +8,5 @@ def flip():
     stream = ffmpeg.output(stream, 'output.mp4')
     subprocess.call(f'echo {sys.argv[1]}')
     ffmpeg.run(stream)
+    
+flip()
