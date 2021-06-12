@@ -1,44 +1,187 @@
-# This function flips the video vertically.
+# This file calls the Azure batch API and starts the job.
 
-import ffmpeg
-import subprocess
+
+from config import _STORAGE_ACCOUNT_NAME,_STORAGE_ACCOUNT_KEY,_BATCH_ACCOUNT_NAME, _BATCH_ACCOUNT_KEY, _BATCH_ACCOUNT_URL, _POOL_ID, _POOL_VM_SIZE, _POOL_NODE_COUNT 
+import os
+import datetime
+import time
+import io
 import sys
-
 import azure.storage.blob as azureblob
 import azure.batch._batch_service_client as batch
 import azure.batch.batch_auth as batchauth
 import azure.batch.models as batchmodels
 
-task_commands = [
-    'python3 ffmpeg-sample.py'
+task_resource_files_urls = [
+    'https://raw.githubusercontent.com/meet86/azure-batch-python-ffmpeg/main/task.py'
 ]
 
-task_resource_files_urls = [
-    
-]
+
+def wrap_commands_in_shell(commands):
+    return "/bin/bash -c 'set -e; set -o pipefail; {}; wait'".format(';'.join(commands))
+
+
+command = "/bin/bash -c \"python3 task.py testparam\""
+
+task_resource_files = [batchmodels.ResourceFile(file_path=os.path.basename(
+    file_url), http_url=file_url) for file_url in task_resource_files_urls]
+
+
+tasks_creation_information = list()
+
+tasks_creation_information.append(batch.models.TaskAddParameter(
+    id='Task01',
+    command_line=command,
+    resource_files=task_resource_files
+))
+
+def create_pool(batch_service_client, pool_id):
+    """
+    Creates a pool of compute nodes with the specified OS settings.
+    :param batch_service_client: A Batch service client.
+    :type batch_service_client: `azure.batch.BatchServiceClient`
+    :param str pool_id: An ID for the new pool.
+    :param str publisher: Marketplace image publisher
+    :param str offer: Marketplace image offer
+    :param str sku: Marketplace image sku
+    """
+    print('Creating pool [{}]...'.format(pool_id))
+
+    # Create a new pool of Linux compute nodes using an Azure Virtual Machines
+    # Marketplace image. For more information about creating pools of Linux
+    # nodes, see:
+    # https://azure.microsoft.com/documentation/articles/batch-linux-nodes/
+    new_pool = batch.models.PoolAddParameter(
+        id=pool_id,
+        virtual_machine_configuration=batchmodels.VirtualMachineConfiguration(
+            image_reference=batchmodels.ImageReference(
+                publisher="Canonical",
+                offer="UbuntuServer",
+                sku="18.04-LTS",
+                version="latest"
+            ),
+            node_agent_sku_id="batch.node.ubuntu 18.04"),
+        vm_size=_POOL_VM_SIZE,
+        target_dedicated_nodes=_POOL_NODE_COUNT
+    )
+    batch_service_client.pool.add(new_pool)
+
 
 def create_job(batch_service_client, job_id, pool_id):
     """
-   Creates a job with the specified ID, associated with the specified pool.
-   :param batch_service_client: A Batch service client.
-   :type batch_service_client: `azure.batch.BatchServiceClient`
-   :param str job_id: The ID for the job.
-   :param str pool_id: The ID for the pool.
-   """
+    Creates a job with the specified ID, associated with the specified pool.
+    :param batch_service_client: A Batch service client.
+    :type batch_service_client: `azure.batch.BatchServiceClient`
+    :param str job_id: The ID for the job.
+    :param str pool_id: The ID for the pool.
+    """
+    print('Creating job [{}]...'.format(job_id))
 
-    print(f'Creating Job [{job_id}]...')
     job = batch.models.JobAddParameter(
         id=job_id,
         pool_info=batch.models.PoolInformation(pool_id=pool_id))
 
     batch_service_client.job.add(job)
-    
-
-def flip():
-    stream = ffmpeg.input('countdown.mov')
-    stream = ffmpeg.vflip(stream)
-    stream = ffmpeg.output(stream, 'output.mp4')
-    ffmpeg.run(stream)
 
 
-flip()
+def wait_for_tasks_to_complete(batch_service_client, job_id, timeout):
+    """
+    Returns when all tasks in the specified job reach the Completed state.
+    :param batch_service_client: A Batch service client.
+    :type batch_service_client: `azure.batch.BatchServiceClient`
+    :param str job_id: The id of the job whose tasks should be to monitored.
+    :param timedelta timeout: The duration to wait for task completion. If all
+    tasks in the specified job do not reach Completed state within this time
+    period, an exception will be raised.
+    """
+    timeout_expiration = datetime.datetime.now() + timeout
+
+    print("Monitoring all tasks for 'Completed' state, timeout in {}..."
+          .format(timeout), end='')
+
+    while datetime.datetime.now() < timeout_expiration:
+        print('.', end='')
+        sys.stdout.flush()
+        tasks = batch_service_client.task.list(job_id)
+
+        incomplete_tasks = [task for task in tasks if
+                            task.state != batchmodels.TaskState.completed]
+        if not incomplete_tasks:
+            print()
+            return True
+        else:
+            time.sleep(1)
+
+    print()
+    raise RuntimeError("ERROR: Tasks did not reach 'Completed' state within "
+                       "timeout period of " + str(timeout))
+
+
+def _read_stream_as_string(stream, encoding):
+    """Read stream as string
+    :param stream: input stream generator
+    :param str encoding: The encoding of the file. The default is utf-8.
+    :return: The file content.
+    :rtype: str
+    """
+    output = io.BytesIO()
+    try:
+        for data in stream:
+            output.write(data)
+        if encoding is None:
+            encoding = 'utf-8'
+        return output.getvalue().decode(encoding)
+    finally:
+        output.close()
+    raise RuntimeError('could not write data to stream or decode bytes')
+
+
+def print_task_output(batch_service_client, job_id, encoding=None):
+    """Prints the stdout.txt file for each task in the job.
+    :param batch_client: The batch client to use.
+    :type batch_client: `batchserviceclient.BatchServiceClient`
+    :param str job_id: The id of the job with task output files to print.
+    """
+
+    print('Printing task output...')
+
+    tasks = batch_service_client.task.list(job_id)
+
+    for task in tasks:
+
+        node_id = batch_service_client.task.get(
+            job_id, task.id).node_info.node_id
+        print("Task: {}".format(task.id))
+        print("Node: {}".format(node_id))
+
+        stream = batch_service_client.file.get_from_task(
+            job_id, task.id, 'stdout.txt')
+
+        file_text = _read_stream_as_string(
+            stream,
+            encoding)
+        print("Standard output:")
+        print(file_text)
+
+
+# This file contains environment variables.
+credentials = batchauth.SharedKeyCredentials(
+    _BATCH_ACCOUNT_NAME, _BATCH_ACCOUNT_KEY)
+
+batch_client = batch.BatchServiceClient(credentials, _BATCH_ACCOUNT_URL)
+
+# create_pool(batch_client, _POOL_ID)
+
+create_job(batch_client, 'TestJob', _POOL_ID)
+
+batch_client.task.add_collection('TestJob', tasks_creation_information)
+
+wait_for_tasks_to_complete(batch_client,
+                           'TestJob',
+                           datetime.timedelta(minutes=30))
+
+print("  Success! All tasks reached the 'Completed' state within the "
+      "specified timeout period.")
+
+# Print the stdout.txt and stderr.txt files for each task to the console
+print_task_output(batch_client, 'TestJob')
