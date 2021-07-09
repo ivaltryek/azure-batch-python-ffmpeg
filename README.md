@@ -1,5 +1,8 @@
 # Azure Batch Using Python and FFmpeg
 
+[![Open in Visual Studio Code](https://open.vscode.dev/badges/open-in-vscode.svg)](https://open.vscode.dev/meet86/azure-batch-python-ffmpeg)
+
+
 Hi!, This project demonstrates how to run custom python script with any pip dependencies. In this project, I've simply used the FFmpeg.
 
 I've decied to write proper README, because there are very less resources on this particular example.
